@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Visual Search — Line Orientation (Z/M)</title>
+
+    <!-- jsPsych -->
+    <script src="https://unpkg.com/jspsych@8.2.2"></script>
+    <link href="https://unpkg.com/jspsych@8.2.2/css/jspsych.css" rel="stylesheet" />
+    <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@2.1.0"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.1.0"></script>
+
+    <style>
+      body { background:#000; color:#fff; margin:0; }
+
+      .stage { position:relative; margin:0 auto; background:#000; }
+
+      /* fixation cross only during fixation */
+      .fix-cross {
+        position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+        width:2px; height:36px; background:#fff;
+      }
+      .fix-cross::after {
+        content:""; position:absolute; left:-18px; top:17px;
+        width:36px; height:2px; background:#fff;
+      }
+
+      .item { position:absolute; }
+      .circle { box-sizing:border-box; border-style:solid; border-radius:50%; background:transparent; }
+      .diamond { box-sizing:border-box; border-style:solid; background:transparent; transform:rotate(45deg); }
+
+      /* airy, simple intro */
+      .intro-wrap{
+        position:absolute; left:50%; top:14%; transform:translateX(-50%);
+        width:min(84%, 820px); line-height:1.9; font-size:20px; text-align:left;
+        padding-bottom:140px;
+      }
+      .intro-wrap h2{ margin-bottom:18px; }
+      .intro-wrap p{ margin:14px 0; }
+      .intro-wrap ul{ margin:8px 0 0 1.2em; }
+    </style>
+  </head>
+  <body></body>
+
+  <script>
+    // ---------- Responsive stage ----------
+    const VIEW_MARGIN = 32;
+    function computeStage(){
+      const vw = Math.max(320, window.innerWidth - 2*VIEW_MARGIN);
+      const vh = Math.max(320, window.innerHeight - 2*VIEW_MARGIN);
+      const side = Math.min(vw, vh);
+      const stage = Math.round(side * 0.9);
+      return { W: stage, H: stage, CX: stage/2, CY: stage/2 };
+    }
+    let { W, H, CX, CY } = computeStage();
+    window.addEventListener('resize', () => { const s = computeStage(); W=s.W; H=s.H; CX=s.CX; CY=s.CY; });
+
+    function stageDiv(inner=''){
+      return `<div class="stage" style="width:${W}px;height:${H}px;margin-top:${VIEW_MARGIN}px">${inner}</div>`;
+    }
+
+    // ---------- jsPsych init ----------
+    const jsPsych = initJsPsych({
+      on_finish: () => jsPsych.data.get().localSave('csv','vs_line_orientation.csv')
+    });
+    jsPsych.data.addProperties({ participant: "P"+Math.random().toString(36).slice(2,8) });
+
+    // ---------- Stimulus builders ----------
+    function polarToXY(r,a,cx,cy){ return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) }; }
+    const palette = ["#ff5252","#ffb300","#8e24aa","#26a69a","#42a5f5","#f57c00","#cddc39","#e91e63","#00bcd4","#9ccc65"];
+
+    // line is ALWAYS white 
+    function itemHTML(shape, size, contourColor, angleDeg){
+      const stroke = Math.max(2, Math.round(size*0.06));
+      const half = size/2;
+
+      const outline = (shape==='circle')
+        ? `<div class="circle" style="position:absolute;width:${size}px;height:${size}px;border:${stroke}px solid ${contourColor};"></div>`
+        : `<div class="diamond" style="position:absolute;width:${size}px;height:${size}px;border:${stroke}px solid ${contourColor};"></div>`;
+
+      const lineLen = Math.round(size*0.7);
+      const lineThk = Math.max(2, Math.round(size*0.06));
+      const line = `<div style="position:absolute;left:${half-lineLen/2}px;top:${half-lineThk/2}px;
+                              width:${lineLen}px;height:${lineThk}px;background:#fff;
+                              transform:rotate(${angleDeg}deg);transform-origin:center center;"></div>`;
+
+      return `<div style="position:absolute;width:${size}px;height:${size}px">${outline}${line}</div>`;
+    }
+
+    function makeSearchHTML(radius, size, targetIndex, targetShape, targetOrientation){
+      const angles = [...Array(6).keys()].map(k => -Math.PI/2 + k*(2*Math.PI/6));
+      const colors = jsPsych.randomization.shuffle(palette).slice(0,6);
+      const distractorShape = (targetShape==='diamond') ? 'circle' : 'diamond';
+      const oblique = [-75,-60,-45,-30,30,45,60,75];
+
+      let inner = '';
+      angles.forEach((a,i)=>{
+        const {x,y} = polarToXY(radius, a, CX, CY);
+        const left = x - size/2, top = y - size/2;
+        const contour = colors[i];
+        const shape = (i===targetIndex) ? targetShape : distractorShape;
+        const angle = (i===targetIndex) ? (targetOrientation==='vertical' ? 90 : 0)
+                                        : jsPsych.randomization.sampleWithoutReplacement(oblique,1)[0];
+        inner += `<div class="item" style="left:${left}px;top:${top}px">${itemHTML(shape,size,contour,angle)}</div>`;
+      });
+      return stageDiv(inner);
+    }
+
+    // ---------- Trial factories ----------
+    const fixation = {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: stageDiv(`<div class="fix-cross"></div>`),
+      choices: "NO_KEYS",
+      trial_duration: () => jsPsych.randomization.sampleWithoutReplacement([400,500,600],1)[0]
+    };
+
+    function searchTrial(radius,size,shape,deadline){
+      const tPos = jsPsych.randomization.sampleWithoutReplacement([0,1,2,3,4,5],1)[0];
+      const tOrient = jsPsych.randomization.sampleWithoutReplacement(['vertical','horizontal'],1)[0];
+      const stim = makeSearchHTML(radius,size,tPos,shape,tOrient);
+      return {
+        type: jsPsychHtmlKeyboardResponse,
+        stimulus: stim,
+        choices: ['z','Z','m','M'],
+        trial_duration: deadline,
+        data: { radius, size, shape, tOrient, deadline },
+        on_finish: d => {
+          const key = (d.response||'').toLowerCase();
+          d.correct = (d.tOrient==='vertical') ? key==='z' : key==='m';
+        }
+      };
+    }
+
+    const feedback = {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: () => stageDiv(
+        `<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:28px">
+           ${jsPsych.data.get().last(1).values()[0].correct ? "Correct" : "Incorrect"}
+         </div>`
+      ),
+      choices: "NO_KEYS",
+      trial_duration: 800
+    };
+    const iti = { type: jsPsychHtmlKeyboardResponse, stimulus: stageDiv(), choices:"NO_KEYS", trial_duration: 500 };
+
+    // ---------- Scaling (screen-safe, proportional radius↔size) ----------
+    const baseFrac = [0.18,0.34,0.50,0.66,0.82];
+    const innerMargin = 20;
+    const baseItem = Math.round(W*0.06);
+    const baseRad  = Math.round(Math.min(CX,CY)*0.33);
+    const radii=[], sizes=[];
+    baseFrac.forEach(frac=>{
+      let r = Math.floor(Math.min(CX,CY)*frac);
+      let s = Math.round(baseItem*(r/baseRad));
+      s = Math.max(18, Math.min(s, Math.round(W*0.16)));
+      const maxAllowed = Math.floor(Math.min(CX,CY) - innerMargin - s/2);
+      r = Math.min(r, maxAllowed);
+      radii.push(r); sizes.push(s);
+    });
+
+    const condsOnce = radii.flatMap((r,i)=>[
+      {r, s:sizes[i], shape:'diamond'},
+      {r, s:sizes[i], shape:'circle'}
+    ]);
+    const training = jsPsych.randomization.sampleWithoutReplacement(condsOnce, 6);
+    const test     = jsPsych.randomization.shuffle([...condsOnce, ...condsOnce]); // 20 trials
+
+    // ---------- Intro (simple, spaced) ----------
+    const intro = {
+      type: jsPsychHtmlButtonResponse,
+      stimulus: stageDiv(`
+        <div class="intro-wrap">
+          <h2>Visual Search</h2>
+          <p>Search for the unique shape target (a <b>circle</b> among diamonds or a <b>diamond</b> among circles) in an array of six differently colored items.</p>
+          <p>Every item contains a straight line. Decide the orientation of the <b>target’s line</b>:</p>
+          <ul>
+            <li><b>Z</b> = vertical</li>
+            <li><b>M</b> = horizontal</li>
+          </ul>
+        </div>
+      `),
+      choices: ["Begin training"]
+    };
+
+    // ---------- Timeline ----------
+    const timeline = [intro];
+
+    // Neutral training header (no timing text)
+    timeline.push({
+      type: jsPsychHtmlButtonResponse,
+      stimulus: stageDiv(`<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center">
+        <h3>Training</h3></div>`),
+      choices: ["Start"]
+    });
+    training.forEach(c => { timeline.push(fixation, searchTrial(c.r,c.s,c.shape,750), feedback, iti); });
+
+    // Neutral test header (no timing text)
+    timeline.push({
+      type: jsPsychHtmlButtonResponse,
+      stimulus: stageDiv(`<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center">
+        <h3>Test</h3></div>`),
+      choices: ["Begin test"]
+    });
+    test.forEach(c => { timeline.push(fixation, searchTrial(c.r,c.s,c.shape,1500), feedback, iti); });
+
+    const end = {
+      type: jsPsychHtmlButtonResponse,
+      stimulus: stageDiv(`<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center">
+        <h2>Experiment complete</h2><p>Your data file has been saved locally.</p></div>`),
+      choices: ["Download CSV"],
+      on_finish: () => jsPsych.data.get().localSave('csv','vs_line_orientation.csv')
+    };
+    timeline.push(end);
+
+    jsPsych.run(timeline);
+  </script>
+</html>
